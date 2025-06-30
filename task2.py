@@ -1,61 +1,142 @@
+# --- 1. SETUP: IMPORT LIBRARIES AND DOWNLOAD DATA ---
+
 import pandas as pd
+import numpy as np
+import re
+import nltk
+from nltk.corpus import stopwords
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
 
-reviews_data = {
-    'review': [
-        # Positive Reviews
-        'This product is amazing! I love it.',
-        'It works perfectly, just as described.',
-        'I am very happy with my purchase.',
-        'Highly recommended to everyone.',
-        'Great quality and fast shipping.',
-        'A wonderful experience, will buy again.',
-        'Absolutely fantastic, five stars!',
-        'The best I have ever used.',
-        # Negative Reviews
-        'Absolutely terrible, do not buy this.',
-        'A complete waste of money.',
-        'The quality is poor and it broke.',
-        'I am so disappointed with this item.',
-        'Did not work at all, very frustrating.',
-        'This was a huge mistake.',
-        'Awful product, terrible service.',
-        'Broke after one use, not worth it.'
-    ],
-    'sentiment': [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0] # 8 positive, 8 negative
-}
-df = pd.DataFrame(reviews_data)
+# Download stopwords from NLTK (only needs to be done once)
+# Stopwords are common words like 'the', 'is', 'in' that are often removed in NLP.
+nltk.download('stopwords')
+print("--- Step 1: Libraries Imported and Setup Complete ---")
 
-print("--- Sample Customer Reviews ---")
-print(df.head()) 
 
-X_text = df['review']
-y = df['sentiment']
+# --- 2. LOAD AND PREPROCESS THE DATASET ---
 
-tfidf_vectorizer = TfidfVectorizer()
-X_tfidf = tfidf_vectorizer.fit_transform(X_text)
+# Load the IMDb Movie Reviews dataset from a public URL
+# This dataset contains 50,000 reviews, labeled as 'positive' or 'negative'.
+url = 'https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz' # This is a common source
+# For simplicity, we'll use a pre-processed CSV version available online.
+csv_url = 'https://raw.githubusercontent.com/Ankit152/IMDB-Sentiment-Analysis/master/IMDB-Dataset.csv'
 
-# --- Split Data and Train the Model (with Stratification) ---
-# Total 16 samples. The split will be 12 for training and 4 for testing.
+print("\n--- Step 2: Loading and Preprocessing Data ---")
+print(f"Loading dataset from: {csv_url}")
+df = pd.read_csv(csv_url)
+
+# Let's look at the first few rows and the data balance
+print("\nDataset Head:")
+print(df.head())
+print("\nSentiment Distribution:")
+print(df['sentiment'].value_counts())
+
+# Preprocessing Steps:
+# 1. Map sentiment labels to numerical values (positive: 1, negative: 0)
+df['sentiment'] = df['sentiment'].map({'positive': 1, 'negative': 0})
+
+# 2. Clean the review text
+stop_words = set(stopwords.words('english'))
+
+def clean_text(text):
+    """
+    Function to clean raw text data.
+    - Removes HTML tags
+    - Removes punctuation and special characters
+    - Converts to lowercase
+    - Removes stopwords
+    """
+    # Remove HTML tags using regex
+    text = re.sub(r'<.*?>', '', text)
+    # Remove non-alphabetic characters
+    text = re.sub(r'[^a-zA-Z]', ' ', text)
+    # Convert to lowercase
+    text = text.lower()
+    # Split into words and remove stopwords
+    words = text.split()
+    words = [w for w in words if not w in stop_words]
+    return ' '.join(words)
+
+# Apply the cleaning function to all reviews
+print("\nCleaning and preprocessing text reviews...")
+df['cleaned_review'] = df['review'].apply(clean_text)
+print("Text cleaning complete. Sample of cleaned data:")
+print(df[['review', 'cleaned_review']].head())
+
+
+# --- 3. SPLIT DATA AND PERFORM TF-IDF VECTORIZATION ---
+
+print("\n--- Step 3: Splitting Data and Applying TF-IDF ---")
+# Split the data into training (80%) and testing (20%) sets
 X_train, X_test, y_train, y_test = train_test_split(
-    X_tfidf, y, test_size=0.25, random_state=42, stratify=y
+    df['cleaned_review'],
+    df['sentiment'],
+    test_size=0.2,
+    random_state=42,
+    stratify=df['sentiment'] # Ensures the split maintains the same proportion of sentiments
 )
 
-lr_model = LogisticRegression()
-lr_model.fit(X_train, y_train)
+# TF-IDF Vectorization: Converts text into a matrix of TF-IDF features.
+# It gives more weight to words that are frequent in a document but rare across all documents.
+vectorizer = TfidfVectorizer(max_features=5000) # Use the top 5000 most frequent words
 
-print("\n--- Logistic Regression Model Training Complete ---")
+# Fit the vectorizer on the training data and transform it
+X_train_tfidf = vectorizer.fit_transform(X_train)
+# Transform the test data using the already fitted vectorizer
+X_test_tfidf = vectorizer.transform(X_test)
 
-y_pred = lr_model.predict(X_test)
+print(f"Data vectorized. Training data shape: {X_train_tfidf.shape}")
+
+
+# --- 4. TRAIN THE LOGISTIC REGRESSION MODEL ---
+
+print("\n--- Step 4: Training the Logistic Regression Model ---")
+# Logistic Regression is a simple yet powerful linear model for classification.
+model = LogisticRegression(solver='liblinear', random_state=42)
+
+# Train the model on the TF-IDF features of the training data
+model.fit(X_train_tfidf, y_train)
+print("Model training complete.")
+
+
+# --- 5. EVALUATE THE MODEL ---
+
+print("\n--- Step 5: Evaluating Model Performance ---")
+# Make predictions on the test data
+y_pred = model.predict(X_test_tfidf)
+
+# Calculate accuracy
 accuracy = accuracy_score(y_test, y_pred)
-report = classification_report(y_test, y_pred)
+print(f"Model Accuracy: {accuracy * 100:.2f}%")
 
-print("\n--- Model Evaluation ---")
-print(f"Test Set Predictions: {y_pred}")
-print(f"Actual Sentiments:    {y_test.values}")
-print(f"\nAccuracy: {accuracy * 100:.2f}%")
+# Show a detailed classification report
 print("\nClassification Report:")
-print(report)
+print(classification_report(y_test, y_pred, target_names=['Negative', 'Positive']))
+
+
+# --- 6. SHOWCASING SENTIMENT EVALUATION (DELIVERABLE) ---
+
+print("\n--- Step 6: Testing the Model on New Reviews ---")
+
+def predict_sentiment(review_text):
+    """
+    Takes a new review, cleans it, vectorizes it, and predicts the sentiment.
+    """
+    cleaned = clean_text(review_text)
+    vectorized = vectorizer.transform([cleaned])
+    prediction = model.predict(vectorized)
+    probability = model.predict_proba(vectorized)
+
+    sentiment = 'Positive' if prediction[0] == 1 else 'Negative'
+    confidence = probability[0][prediction[0]]
+
+    print(f"Review: '{review_text}'")
+    print(f"Predicted Sentiment: {sentiment} (Confidence: {confidence:.2f})\n")
+
+# Example reviews
+predict_sentiment("This movie was absolutely brilliant! The acting was superb and the plot was gripping.")
+predict_sentiment("A complete waste of time. The plot was predictable and the acting was terrible.")
+predict_sentiment("It was an okay movie, not great but not bad either. I might watch it again.")
